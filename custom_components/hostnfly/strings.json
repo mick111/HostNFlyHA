@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HostNFly",
+        "description": "Enter your HostNFly credentials.",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "host": "API host"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate HostNFly",
+        "description": "Enter your password to refresh the session.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This account is already configured",
+      "reauth_successful": "Re-authentication successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Update interval (minutes)",
+          "lookback_days": "Past window (days)",
+          "lookahead_days": "Future window (days)"
+        }
+      }
+    }
+  }
+}
