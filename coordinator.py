@@ -220,6 +220,26 @@ def _reservation_guest_count(reservation: dict[str, Any]) -> int | None:
     return _sum_guest_parts(reservation)
 
 
+def _coerce_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text.replace(",", "."))
+        except ValueError:
+            return None
+    return None
+
+
+def _reservation_amount(reservation: dict[str, Any]) -> float | None:
+    return _coerce_float(reservation.get("amount"))
+
+
 def _is_cancelled(reservation: dict[str, Any]) -> bool:
     status = str(reservation.get("status", "")).lower()
     return status in {"cancelled", "canceled", "void", "refused"}
@@ -265,6 +285,7 @@ def _next_reservation(
         "guest_count": _reservation_guest_count(reservation),
         "guest_profile_url": _reservation_guest_profile_url(reservation),
         "source": reservation.get("source"),
+        "amount": _reservation_amount(reservation),
         "start_date": start_date,
         "end_date": end_date,
     }
@@ -290,6 +311,7 @@ def _current_reservation(reservations: list[dict[str, Any]], today: date) -> dic
         "guest_count": _reservation_guest_count(reservation),
         "guest_profile_url": _reservation_guest_profile_url(reservation),
         "source": reservation.get("source"),
+        "amount": _reservation_amount(reservation),
         "start_date": start_date,
         "end_date": end_date,
     }

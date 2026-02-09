@@ -132,6 +132,8 @@ class HostNFlySensor(CoordinatorEntity[HostNFlyCoordinator], SensorEntity):
             attrs["guest_profile_url"] = reservation["guest_profile_url"]
         if reservation.get("source"):
             attrs["source"] = reservation["source"]
+        if reservation.get("amount") is not None:
+            attrs["amount"] = reservation["amount"]
         if reservation.get("start_date"):
             attrs["start_date"] = reservation["start_date"].isoformat()
         if reservation.get("end_date"):
