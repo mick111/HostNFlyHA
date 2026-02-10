@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 from urllib.parse import urlparse
 
@@ -135,3 +136,11 @@ class HostNFlyApi:
         }
         data = await self._request("GET", "/api/v2/reservations", params=params)
         return data.get("reservations", [])
+
+    async def async_get_transfers(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        params = {
+            "start_date": start_date.strftime("%Y/%m"),
+            "end_date": end_date.strftime("%Y/%m"),
+        }
+        data = await self._request("GET", "/api/v1/transfers", params=params)
+        return data.get("transfers", [])

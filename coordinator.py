@@ -61,6 +61,12 @@ class HostNFlyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         listings = await self.api.async_get_listings()
         reservations = await self.api.async_get_reservations(min_date.isoformat(), max_date.isoformat())
+        amount_by_reservation_id: dict[str, Any] = {}
+        try:
+            transfers = await self.api.async_get_transfers(min_date, max_date)
+            amount_by_reservation_id = _amounts_by_reservation_id(transfers)
+        except Exception as err:
+            _LOGGER.debug("Impossible de charger les transferts: %s", err)
 
         reservations_by_listing: dict[str, list[dict[str, Any]]] = {}
         for reservation in reservations:
@@ -77,12 +83,21 @@ class HostNFlyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not listing_id:
                 continue
             listing_reservations = reservations_by_listing.get(listing_id, [])
-            current_reservation = _current_reservation(listing_reservations, today)
+            current_reservation = _current_reservation(
+                listing_reservations,
+                today,
+                amount_by_reservation_id,
+            )
             data[listing_id] = {
                 "listing": listing,
                 "occupancy": current_reservation is not None,
                 "current_reservation": current_reservation,
-                "next_reservation": _next_reservation(listing_reservations, today, current_reservation),
+                "next_reservation": _next_reservation(
+                    listing_reservations,
+                    today,
+                    current_reservation,
+                    amount_by_reservation_id,
+                ),
             }
 
         return data
@@ -105,6 +120,14 @@ def _reservation_listing_id(reservation: dict[str, Any]) -> str | None:
         nested_id = listing.get("id")
         if nested_id is not None:
             return str(nested_id)
+    return None
+
+
+def _reservation_id(reservation: dict[str, Any]) -> str | None:
+    for key in ("id", "reservation_id", "uid", "uuid"):
+        value = reservation.get(key)
+        if value is not None:
+            return str(value)
     return None
 
 
@@ -240,6 +263,37 @@ def _reservation_amount(reservation: dict[str, Any]) -> float | None:
     return _coerce_float(reservation.get("amount"))
 
 
+def _reservation_amount_from_map(
+    reservation: dict[str, Any],
+    amount_by_reservation_id: dict[str, Any] | None,
+) -> float | None:
+    if not amount_by_reservation_id:
+        return None
+    reservation_id = _reservation_id(reservation)
+    if not reservation_id:
+        return None
+    return _coerce_float(amount_by_reservation_id.get(reservation_id))
+
+
+def _amounts_by_reservation_id(transfers: list[dict[str, Any]]) -> dict[str, Any]:
+    amounts: dict[str, Any] = {}
+    for transfer in transfers:
+        if not isinstance(transfer, dict):
+            continue
+        reservations = transfer.get("reservations")
+        if not isinstance(reservations, list):
+            continue
+        for reservation in reservations:
+            if not isinstance(reservation, dict):
+                continue
+            reservation_id = _reservation_id(reservation)
+            if not reservation_id:
+                continue
+            if "amount" in reservation:
+                amounts[reservation_id] = reservation.get("amount")
+    return amounts
+
+
 def _is_cancelled(reservation: dict[str, Any]) -> bool:
     status = str(reservation.get("status", "")).lower()
     return status in {"cancelled", "canceled", "void", "refused"}
@@ -262,6 +316,7 @@ def _next_reservation(
     reservations: list[dict[str, Any]],
     today: date,
     current_reservation: dict[str, Any] | None,
+    amount_by_reservation_id: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     threshold = today
     if current_reservation:
@@ -279,19 +334,26 @@ def _next_reservation(
         return None
 
     start_date, reservation, end_date = min(upcoming, key=lambda item: item[0])
+    amount = _reservation_amount(reservation)
+    if amount is None:
+        amount = _reservation_amount_from_map(reservation, amount_by_reservation_id)
     return {
         "reservation_id": reservation.get("id"),
         "guest_name": _reservation_guest_name(reservation),
         "guest_count": _reservation_guest_count(reservation),
         "guest_profile_url": _reservation_guest_profile_url(reservation),
         "source": reservation.get("source"),
-        "amount": _reservation_amount(reservation),
+        "amount": amount,
         "start_date": start_date,
         "end_date": end_date,
     }
 
 
-def _current_reservation(reservations: list[dict[str, Any]], today: date) -> dict[str, Any] | None:
+def _current_reservation(
+    reservations: list[dict[str, Any]],
+    today: date,
+    amount_by_reservation_id: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     active: list[tuple[date, dict[str, Any], date | None]] = []
     for reservation in reservations:
         start_date, end_date = _reservation_dates(reservation)
@@ -305,13 +367,16 @@ def _current_reservation(reservations: list[dict[str, Any]], today: date) -> dic
     if not active:
         return None
     start_date, reservation, end_date = min(active, key=lambda item: item[0])
+    amount = _reservation_amount(reservation)
+    if amount is None:
+        amount = _reservation_amount_from_map(reservation, amount_by_reservation_id)
     return {
         "reservation_id": reservation.get("id"),
         "guest_name": _reservation_guest_name(reservation),
         "guest_count": _reservation_guest_count(reservation),
         "guest_profile_url": _reservation_guest_profile_url(reservation),
         "source": reservation.get("source"),
-        "amount": _reservation_amount(reservation),
+        "amount": amount,
         "start_date": start_date,
         "end_date": end_date,
     }
