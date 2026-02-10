@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 import logging
 from typing import Any
 
@@ -55,7 +55,8 @@ class HostNFlyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Erreur API HostNFly: {err}") from err
 
     async def _async_fetch_data(self) -> dict[str, Any]:
-        today = dt_util.now().date()
+        now = dt_util.now()
+        today = now.date()
         min_date = today - timedelta(days=self.lookback_days)
         max_date = today + timedelta(days=self.lookahead_days)
 
@@ -85,7 +86,7 @@ class HostNFlyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             listing_reservations = reservations_by_listing.get(listing_id, [])
             current_reservation = _current_reservation(
                 listing_reservations,
-                today,
+                now,
                 amount_by_reservation_id,
             )
             data[listing_id] = {
@@ -94,7 +95,7 @@ class HostNFlyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "current_reservation": current_reservation,
                 "next_reservation": _next_reservation(
                     listing_reservations,
-                    today,
+                    now,
                     current_reservation,
                     amount_by_reservation_id,
                 ),
@@ -144,6 +145,10 @@ def _parse_date(value: Any) -> date | None:
             if parsed:
                 return parsed.date()
     return None
+
+
+def _date_at_noon(value: date, tzinfo) -> datetime:
+    return datetime.combine(value, time(12, 0), tzinfo=tzinfo)
 
 
 def _reservation_dates(reservation: dict[str, Any]) -> tuple[date | None, date | None]:
@@ -314,26 +319,29 @@ def _is_occupied(reservations: list[dict[str, Any]], today: date) -> bool:
 
 def _next_reservation(
     reservations: list[dict[str, Any]],
-    today: date,
+    now: datetime,
     current_reservation: dict[str, Any] | None,
     amount_by_reservation_id: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    threshold = today
+    threshold = now
     if current_reservation:
         end_date = current_reservation.get("end_date")
         if isinstance(end_date, date):
-            threshold = end_date
+            threshold = _date_at_noon(end_date, now.tzinfo)
 
-    upcoming: list[tuple[date, dict[str, Any], date | None]] = []
+    upcoming: list[tuple[datetime, dict[str, Any], date | None, date]] = []
     for reservation in reservations:
         start_date, end_date = _reservation_dates(reservation)
-        if not start_date or start_date < threshold:
+        if not start_date:
             continue
-        upcoming.append((start_date, reservation, end_date))
+        start_dt = _date_at_noon(start_date, now.tzinfo)
+        if start_dt < threshold:
+            continue
+        upcoming.append((start_dt, reservation, end_date, start_date))
     if not upcoming:
         return None
 
-    start_date, reservation, end_date = min(upcoming, key=lambda item: item[0])
+    _, reservation, end_date, start_date = min(upcoming, key=lambda item: item[0])
     amount = _reservation_amount(reservation)
     if amount is None:
         amount = _reservation_amount_from_map(reservation, amount_by_reservation_id)
@@ -351,22 +359,24 @@ def _next_reservation(
 
 def _current_reservation(
     reservations: list[dict[str, Any]],
-    today: date,
+    now: datetime,
     amount_by_reservation_id: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    active: list[tuple[date, dict[str, Any], date | None]] = []
+    active: list[tuple[datetime, dict[str, Any], date | None, date]] = []
     for reservation in reservations:
         start_date, end_date = _reservation_dates(reservation)
         if not start_date:
             continue
+        start_dt = _date_at_noon(start_date, now.tzinfo)
         if end_date:
-            if start_date <= today < end_date:
-                active.append((start_date, reservation, end_date))
-        elif start_date <= today:
-            active.append((start_date, reservation, end_date))
+            end_dt = _date_at_noon(end_date, now.tzinfo)
+            if start_dt <= now < end_dt:
+                active.append((start_dt, reservation, end_date, start_date))
+        elif start_dt <= now:
+            active.append((start_dt, reservation, end_date, start_date))
     if not active:
         return None
-    start_date, reservation, end_date = min(active, key=lambda item: item[0])
+    _, reservation, end_date, start_date = min(active, key=lambda item: item[0])
     amount = _reservation_amount(reservation)
     if amount is None:
         amount = _reservation_amount_from_map(reservation, amount_by_reservation_id)
