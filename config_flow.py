@@ -28,42 +28,13 @@ from .const import (
 class HostNFlyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict[str, str] | None = None) -> FlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, str] | None = None
+    ) -> FlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            session = async_get_clientsession(self.hass)
-            api = HostNFlyApi(
-                session=session,
-                host=user_input[CONF_HOST],
-                email=user_input[CONF_EMAIL],
-                password=user_input[CONF_PASSWORD],
-            )
-            try:
-                await api.async_login()
-            except HostNFlyAuthError:
-                errors["base"] = "invalid_auth"
-            except HostNFlyApiError:
-                errors["base"] = "cannot_connect"
-            except Exception:  # pragma: no cover - sécurité
-                errors["base"] = "unknown"
-            else:
-                await self.async_set_unique_id(f"{user_input[CONF_EMAIL]}@{api.host}")
-                self._abort_if_unique_id_configured()
-                tokens = api.tokens
-                if not tokens:
-                    errors["base"] = "cannot_connect"
-                else:
-                    return self.async_create_entry(
-                        title=user_input[CONF_EMAIL],
-                        data={
-                            CONF_EMAIL: user_input[CONF_EMAIL],
-                            CONF_HOST: api.host,
-                            CONF_ACCESS_TOKEN: tokens.access_token,
-                            CONF_CLIENT: tokens.client,
-                            CONF_UID: tokens.uid,
-                        },
-                    )
+            return await self._async_handle_login(user_input)
 
         data_schema = vol.Schema(
             {
@@ -72,10 +43,69 @@ class HostNFlyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_HOST, default=DEFAULT_HOST): str,
             }
         )
-        return self.async_show_form(step_id="user", data_schema=data_schema, errors=errors)
+        return self.async_show_form(
+            step_id="user", data_schema=data_schema, errors=errors
+        )
 
-    async def async_step_reauth(self, user_input: dict[str, str] | None = None) -> FlowResult:
-        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+    async def async_step_import(self, import_config: dict[str, str]) -> FlowResult:
+        return await self._async_handle_login(import_config)
+
+    async def _async_handle_login(self, data: dict[str, str]) -> FlowResult:
+        errors: dict[str, str] = {}
+        session = async_get_clientsession(self.hass)
+        api = HostNFlyApi(
+            session=session,
+            host=data.get(CONF_HOST, DEFAULT_HOST),
+            email=data[CONF_EMAIL],
+            password=data[CONF_PASSWORD],
+        )
+        try:
+            await api.async_login()
+        except HostNFlyAuthError:
+            errors["base"] = "invalid_auth"
+        except HostNFlyApiError:
+            errors["base"] = "cannot_connect"
+        except Exception:  # pragma: no cover - sécurité
+            errors["base"] = "unknown"
+        else:
+            await self.async_set_unique_id(f"{data[CONF_EMAIL]}@{api.host}")
+            self._abort_if_unique_id_configured()
+            tokens = api.tokens
+            if not tokens:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_create_entry(
+                    title=data[CONF_EMAIL],
+                    data={
+                        CONF_EMAIL: data[CONF_EMAIL],
+                        CONF_HOST: api.host,
+                        CONF_PASSWORD: data[CONF_PASSWORD],
+                        CONF_ACCESS_TOKEN: tokens.access_token,
+                        CONF_CLIENT: tokens.client,
+                        CONF_UID: tokens.uid,
+                    },
+                )
+
+        if self.current_step == "user":
+            data_schema = vol.Schema(
+                {
+                    vol.Required(CONF_EMAIL): str,
+                    vol.Required(CONF_PASSWORD): str,
+                    vol.Optional(CONF_HOST, default=DEFAULT_HOST): str,
+                }
+            )
+            return self.async_show_form(
+                step_id="user", data_schema=data_schema, errors=errors
+            )
+
+        return self.async_abort(reason=errors.get("base", "unknown"))
+
+    async def async_step_reauth(
+        self, user_input: dict[str, str] | None = None
+    ) -> FlowResult:
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -122,7 +152,9 @@ class HostNFlyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     @staticmethod
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
         return HostNFlyOptionsFlowHandler(config_entry)
 
 
@@ -130,7 +162,9 @@ class HostNFlyOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
         self._entry = entry
 
-    async def async_step_init(self, user_input: dict[str, int] | None = None) -> FlowResult:
+    async def async_step_init(
+        self, user_input: dict[str, int] | None = None
+    ) -> FlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 

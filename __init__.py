@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import voluptuous as vol
+from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -12,10 +14,39 @@ from .const import (
     CONF_HOST,
     CONF_PASSWORD,
     CONF_UID,
+    DEFAULT_HOST,
     DOMAIN,
     PLATFORMS,
 )
 from .coordinator import HostNFlyCoordinator
+
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_EMAIL): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_HOST, default=DEFAULT_HOST): str,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    conf = config.get(DOMAIN)
+    if conf is None:
+        return True
+
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_IMPORT},
+            data=conf,
+        )
+    )
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
